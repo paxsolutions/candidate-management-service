@@ -1,0 +1,76 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pax-app-backend
+    ports:
+      - "5001:5000"
+    environment:
+      - NODE_ENV=development
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - FRONTEND_URL=http://localhost:3000
+      - DB_HOST=db
+      - DB_USER=${DB_USER:-pax_user}
+      - DB_PASSWORD=${DB_PASSWORD:-pax_password}
+      - DB_NAME=${DB_NAME:-pax_local}
+      - DB_PORT=${DB_PORT:-3306}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+    depends_on:
+      - db
+    restart: unless-stopped
+    networks:
+      - pax-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pax-app-frontend
+    environment:
+      - REACT_APP_API_URL=${REACT_APP_API_URL}
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - pax-network
+
+  db:
+    image: mysql:8.0
+    container_name: pax-db
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${DB_NAME:-pax_local}
+      MYSQL_USER: ${DB_USER:-pax_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-pax_password}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./data:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    networks:
+      - pax-network
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8080:8080
+    networks:
+      - pax-network
+
+networks:
+  pax-network:
+    driver: bridge
+
+volumes:
+  mysql_data:

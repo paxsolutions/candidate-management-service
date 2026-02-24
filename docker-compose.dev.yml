@@ -1,0 +1,92 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: pax-app-backend-dev
+    ports:
+      - "5001:5000"
+    environment:
+      - NODE_ENV=development
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - FRONTEND_URL=http://localhost:3000
+      - DB_HOST=db
+      - DB_USER=${DB_USER:-pax_user}
+      - DB_PASSWORD=${DB_PASSWORD:-pax_password}
+      - DB_NAME=${DB_NAME:-pax_local}
+      - DB_PORT=${DB_PORT:-3306}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+    volumes:
+      # Mount source code for hot reload
+      - ./backend:/app
+      # Prevent node_modules from being overwritten
+      - /app/node_modules
+    depends_on:
+      - db
+    restart: unless-stopped
+    networks:
+      - pax-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: pax-app-frontend-dev
+    environment:
+      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:5001}
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount source code for hot reload
+      - ./frontend:/app
+      # Prevent node_modules from being overwritten
+      - /app/node_modules
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - pax-network
+    stdin_open: true
+    tty: true
+
+  db:
+    image: mysql:8.0
+    container_name: pax-db-dev
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${DB_NAME:-pax_db}
+      MYSQL_USER: ${DB_USER:-pax_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-pax_password}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data_dev:/var/lib/mysql
+      - ./data:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    networks:
+      - pax-network
+    env_file:
+      - .env.development
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8080:8080
+    networks:
+      - pax-network
+
+networks:
+  pax-network:
+    driver: bridge
+
+volumes:
+  mysql_data_dev:

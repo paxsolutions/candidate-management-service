@@ -1,0 +1,16 @@
+.env
+node_modules
+backend/.env
+backend/dist
+backend/build
+backend/logs
+frontend/node_modules
+frontend/.env
+frontend/build
+frontend/logs
+data
+infrastructure/cdk.out
+infrastructure/cdk.context.json
+infrastructure/node_modules
+.env.development
+database.sql
