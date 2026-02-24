@@ -1,4 +1,4 @@
-# PAX Access App — Candidate Management Platform
+# Candidate Management Platform
 
 A full-stack candidate management application built with **Node.js/Express** and **React/TypeScript**, featuring Google OAuth authentication, advanced search, file management via AWS S3 pre-signed URLs, and a production deployment on AWS using Infrastructure as Code (CDK).
 
@@ -22,7 +22,7 @@ A full-stack candidate management application built with **Node.js/Express** and
 
 ## Overview
 
-PAX Access App is an internal tool for managing candidate records. Users authenticate via Google OAuth, then browse, search, and view detailed candidate profiles. The application supports:
+Candidate Management Platform is an internal tool for managing candidate records. Users authenticate via Google OAuth, then browse, search, and view detailed candidate profiles. The application supports:
 
 - **Searchable candidate table** with server-side pagination and column sorting
 - **Detailed candidate profiles** with notes, file downloads (S3 pre-signed URLs), and rich field rendering
