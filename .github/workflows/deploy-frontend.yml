@@ -1,0 +1,137 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+
+concurrency:
+  group: deploy-frontend
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test -- --watchAll=false
+        env:
+          CI: true
+
+  build-and-deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.0.0
+        with:
+          role-to-assume: ${{ fromJson(secrets.APP_SECRETS).AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build React application
+        working-directory: frontend
+        run: npm run build
+        env:
+          REACT_APP_API_URL: ${{ fromJson(secrets.APP_SECRETS).REACT_APP_API_URL }}
+
+      - name: Get S3 bucket name from CloudFormation
+        id: cfn
+        run: |
+          BUCKET_NAME=$(aws cloudformation describe-stacks \
+            --stack-name CandidateAppStack \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+          DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
+            --stack-name CandidateAppStack \
+            --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+          echo "bucket_name=$BUCKET_NAME" >> "$GITHUB_OUTPUT"
+          echo "distribution_id=$DISTRIBUTION_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Sync static assets to S3 (long cache)
+        working-directory: frontend
+        run: |
+          aws s3 sync build/ s3://${{ steps.cfn.outputs.bucket_name }}/ \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html" \
+            --exclude "asset-manifest.json" \
+            --exclude "manifest.json" \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Upload index.html (no cache)
+        working-directory: frontend
+        run: |
+          aws s3 cp build/index.html s3://${{ steps.cfn.outputs.bucket_name }}/index.html \
+            --cache-control "public,max-age=0,must-revalidate" \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Upload manifests (short cache)
+        working-directory: frontend
+        run: |
+          aws s3 cp build/asset-manifest.json \
+            s3://${{ steps.cfn.outputs.bucket_name }}/asset-manifest.json \
+            --cache-control "public,max-age=0,must-revalidate" \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          aws s3 cp build/manifest.json \
+            s3://${{ steps.cfn.outputs.bucket_name }}/manifest.json \
+            --cache-control "public,max-age=86400" \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || true
+
+      - name: Invalidate CloudFront cache
+        run: |
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
+            --distribution-id ${{ steps.cfn.outputs.distribution_id }} \
+            --paths "/*" \
+            --query 'Invalidation.Id' \
+            --output text)
+          echo "CloudFront invalidation created: $INVALIDATION_ID"
+
+      - name: Print deployment summary
+        run: |
+          DOMAIN=$(aws cloudformation describe-stacks \
+            --stack-name CandidateAppStack \
+            --query "Stacks[0].Outputs[?OutputKey=='DomainName'].OutputValue" \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+          echo "### Frontend Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- **S3 Bucket:** ${{ steps.cfn.outputs.bucket_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **CloudFront Distribution:** ${{ steps.cfn.outputs.distribution_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL:** https://$DOMAIN" >> $GITHUB_STEP_SUMMARY

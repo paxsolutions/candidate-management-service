@@ -1,0 +1,86 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "infrastructure/**"
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: "npm"
+          cache-dependency-path: infrastructure/package-lock.json
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.0.0
+        with:
+          role-to-assume: ${{ fromJson(secrets.APP_SECRETS).AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Write .env file for CDK
+        env:
+          APP_SECRETS: ${{ toJson(fromJson(secrets.APP_SECRETS)) }}
+        run: |
+          echo "$APP_SECRETS" | jq -r 'to_entries[] | "\(.key)=\(.value)"' > .env
+          echo "AWS_REGION=${{ env.AWS_REGION }}" >> .env
+
+      - name: Install CDK dependencies
+        working-directory: infrastructure
+        run: npm ci
+
+      - name: CDK diff
+        working-directory: infrastructure
+        run: npx cdk diff 2>&1 || true
+
+      - name: CDK deploy
+        working-directory: infrastructure
+        run: npx cdk deploy --require-approval never
+
+      - name: Print stack outputs
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name CandidateAppStack \
+            --query "Stacks[0].Outputs[].[OutputKey,OutputValue]" \
+            --output table \
+            --region ${{ env.AWS_REGION }}
